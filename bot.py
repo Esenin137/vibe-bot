@@ -6,17 +6,17 @@ from google import genai
 from groq import Groq
 from aiohttp import web
 
-TG_TOKEN = os.getenv("TG_TOKEN")
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-GITHUB_REPO = os.getenv("GITHUB_REPO")
-GEMINI_KEY = os.getenv("GEMINI_API_KEY")
-GROQ_KEY = os.getenv("GROQ_API_KEY")
-VERCEL_URL = os.getenv("VERCEL_URL")
+TG_TOKEN = (os.getenv("TG_TOKEN") or "").strip()
+GITHUB_TOKEN = (os.getenv("GITHUB_TOKEN") or "").strip()
+GITHUB_REPO = (os.getenv("GITHUB_REPO") or "").strip()
+GEMINI_KEY = (os.getenv("GEMINI_API_KEY") or "").strip()
+GROQ_KEY = (os.getenv("GROQ_API_KEY") or "").strip()
+VERCEL_URL = (os.getenv("VERCEL_URL") or "").strip()
 
 bot = Bot(token=TG_TOKEN)
 dp = Dispatcher()
-groq_client = Groq(api_key=GROQ_KEY)
-ai_client = genai.Client(api_key=GEMINI_KEY)
+groq_client = Groq(api_key=GROQ_KEY) if GROQ_KEY else None
+ai_client = genai.Client(api_key=GEMINI_KEY) if GEMINI_KEY else None
 gh = Github(GITHUB_TOKEN).get_repo(GITHUB_REPO)
 
 SYSTEM_PROMPT = """
@@ -29,36 +29,53 @@ SYSTEM_PROMPT = """
 """
 
 def generate_code_with_ai(prompt: str) -> str:
-    # 1. Сначала пробуем быстрые модели через Groq (работают мгновенно и без 503 ошибок)
-    groq_models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
-    for g_model in groq_models:
-        try:
-            chat_completion = groq_client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt}
-                ],
-                model=g_model,
-                temperature=0.5,
-            )
-            return chat_completion.choices[0].message.content
-        except Exception as e:
-            print(f"Groq {g_model} error: {e}")
+    errors = []
 
-    # 2. Резервный вариант через Gemini, если Groq недоступен
-    gemini_models = ["gemini-3.8-flash-lite", "gemini-3.8-flash"]
-    for m_name in gemini_models:
+    # 1. Автоматически ищем доступные текстовые модели в Groq и пробуем их
+    if groq_client:
         try:
-            response = ai_client.models.generate_content(
-                model=m_name,
-                contents=prompt,
-                config={"system_instruction": SYSTEM_PROMPT}
-            )
-            return response.text
-        except Exception as e:
-            print(f"Gemini {m_name} error: {e}")
+            avail_models = [
+                m.id for m in groq_client.models.list().data
+                if "whisper" not in m.id.lower() and "guard" not in m.id.lower() and "tts" not in m.id.lower()
+            ]
+            # Ставим самые мощные модели (llama / qwen / deepseek) первыми в очередь
+            preferred = [m for m in avail_models if any(k in m.lower() for k in ["llama-3.3", "llama-3.1", "qwen", "deepseek", "llama"])]
+            models_to_try = preferred + [m for m in avail_models if m not in preferred]
 
-    raise Exception("Все ИИ-сервера сейчас перегружены. Попробуйте через минуту.")
+            for g_model in models_to_try[:4]:
+                try:
+                    chat_completion = groq_client.chat.completions.create(
+                        messages=[
+                            {"role": "system", "content": SYSTEM_PROMPT},
+                            {"role": "user", "content": prompt}
+                        ],
+                        model=g_model,
+                        temperature=0.5,
+                    )
+                    return chat_completion.choices[0].message.content
+                except Exception as e:
+                    errors.append(f"Groq ({g_model}): {str(e)[:120]}")
+        except Exception as e:
+            errors.append(f"Groq Key/List Error: {str(e)[:150]}")
+    else:
+        errors.append("GROQ_API_KEY пуст в настройках Render")
+
+    # 2. Пробуем модели Gemini
+    if ai_client:
+        for m_name in ["gemini-3.8-flash-lite", "gemini-3.8-pro", "gemini-3.8-flash", "gemini-2.5-pro"]:
+            try:
+                response = ai_client.models.generate_content(
+                    model=m_name,
+                    contents=prompt,
+                    config={"system_instruction": SYSTEM_PROMPT}
+                )
+                return response.text
+            except Exception as e:
+                errors.append(f"Gemini ({m_name}): {str(e)[:120]}")
+    else:
+        errors.append("GEMINI_API_KEY пуст в настройках Render")
+
+    raise Exception("Детали ошибок API:\n" + "\n".join(errors[:4]))
 
 async def process_task(task_text: str, message: types.Message):
     status_msg = await message.reply("⚙️ Архитектор думает и пишет код...")
@@ -93,7 +110,7 @@ async def process_task(task_text: str, message: types.Message):
             f"✅ **Готово!**\n\n📝 **Задача:** {task_text}\n🚀 **Проверяй билд:** {VERCEL_URL}"
         )
     except Exception as e:
-        await status_msg.edit_text(f"❌ Ошибка: {str(e)}")
+        await status_msg.edit_text(f"❌ Ошибка:\n{str(e)[:3500]}")
 
 @dp.message(F.voice)
 async def handle_voice(message: types.Message):
