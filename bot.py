@@ -28,6 +28,38 @@ SYSTEM_PROMPT = """
 3. Верни ТОЛЬКО чистый исходный код без тройных кавычек ```html и без пояснительного текста.
 """
 
+def generate_code_with_ai(prompt: str) -> str:
+    # 1. Сначала пробуем быстрые модели через Groq (работают мгновенно и без 503 ошибок)
+    groq_models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+    for g_model in groq_models:
+        try:
+            chat_completion = groq_client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt}
+                ],
+                model=g_model,
+                temperature=0.5,
+            )
+            return chat_completion.choices[0].message.content
+        except Exception as e:
+            print(f"Groq {g_model} error: {e}")
+
+    # 2. Резервный вариант через Gemini, если Groq недоступен
+    gemini_models = ["gemini-3.8-flash-lite", "gemini-3.8-flash"]
+    for m_name in gemini_models:
+        try:
+            response = ai_client.models.generate_content(
+                model=m_name,
+                contents=prompt,
+                config={"system_instruction": SYSTEM_PROMPT}
+            )
+            return response.text
+        except Exception as e:
+            print(f"Gemini {m_name} error: {e}")
+
+    raise Exception("Все ИИ-сервера сейчас перегружены. Попробуйте через минуту.")
+
 async def process_task(task_text: str, message: types.Message):
     status_msg = await message.reply("⚙️ Архитектор думает и пишет код...")
     
@@ -42,13 +74,9 @@ async def process_task(task_text: str, message: types.Message):
     prompt = f"Текущий код проекта:\n{current_code}\n\nЗадача от пользователя:\n{task_text}\n\nНапиши обновленный файл index.html целиком."
 
     try:
-        response = ai_client.models.generate_content(
-            model="gemini-1.5-flash",
-            contents=prompt,
-            config={"system_instruction": SYSTEM_PROMPT}
-        )
-
-        new_code = response.text.strip()
+        raw_output = generate_code_with_ai(prompt)
+        new_code = raw_output.strip()
+        
         if new_code.startswith("```"):
             new_code = "\n".join(new_code.split("\n")[1:])
         if new_code.endswith("```"):
