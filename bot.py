@@ -4,6 +4,7 @@ from aiogram import Bot, Dispatcher, F, types
 from github import Github
 from google import genai
 from groq import Groq
+from aiohttp import web
 
 TG_TOKEN = os.getenv("TG_TOKEN")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
@@ -94,10 +95,24 @@ async def handle_voice(message: types.Message):
 async def handle_text(message: types.Message):
     await process_task(message.text, message)
 
+# Простейший сервер, чтобы Render не ругался на отсутствие портов
+async def handle_ping(request):
+    return web.Response(text="Bot is running!")
+
+async def start_dummy_web_server():
+    app = web.Application()
+    app.router.add_get("/", handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv("PORT", 10000))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+
 async def main():
     print("Бот запущен...")
+    await start_dummy_web_server()
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-  
+    
