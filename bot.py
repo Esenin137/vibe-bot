@@ -1,0 +1,103 @@
+import os
+import asyncio
+from aiogram import Bot, Dispatcher, F, types
+from github import Github
+from google import genai
+from groq import Groq
+
+TG_TOKEN = os.getenv("TG_TOKEN")
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+GITHUB_REPO = os.getenv("GITHUB_REPO")
+GEMINI_KEY = os.getenv("GEMINI_API_KEY")
+GROQ_KEY = os.getenv("GROQ_API_KEY")
+VERCEL_URL = os.getenv("VERCEL_URL")
+
+bot = Bot(token=TG_TOKEN)
+dp = Dispatcher()
+groq_client = Groq(api_key=GROQ_KEY)
+ai_client = genai.Client(api_key=GEMINI_KEY)
+gh = Github(GITHUB_TOKEN).get_repo(GITHUB_REPO)
+
+SYSTEM_PROMPT = """
+Ты — элитный разработчик мобильных веб-приложений и HTML5/Canvas игр.
+Твоя цель: сгенерировать ПОЛНЫЙ, рабочий файл index.html, содержащий CSS и JS внутри.
+Правила:
+1. Обязателен метатег viewport для мобильных устройств.
+2. Приложение/игра должно поддерживать сенсорное управление (Touch events, Pointer events).
+3. Верни ТОЛЬКО чистый исходный код без тройных кавычек ```html и без пояснительного текста.
+"""
+
+async def process_task(task_text: str, message: types.Message):
+    status_msg = await message.reply("⚙️ Архитектор думает и пишет код...")
+    
+    try:
+        current_file = gh.get_contents("index.html")
+        current_code = current_file.decoded_content.decode("utf-8")
+        file_sha = current_file.sha
+    except Exception:
+        current_code = ""
+        file_sha = None
+
+    prompt = f"""
+    Текущий код проекта:
+    {current_code}
+
+    Задача от пользователя:
+    {task_text}
+
+    Напиши обновленный файл index.html целиком.
+    """
+
+    try:
+        response = ai_client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config={"system_instruction": SYSTEM_PROMPT}
+        )
+        new_code = response.text.strip()
+        if new_code.startswith("```"):
+            new_code = "\n".join(new_code.split("\n")[1:])
+        if new_code.endswith("```"):
+            new_code = "\n".join(new_code.split("\n")[:-1])
+        new_code = new_code.strip()
+
+        commit_msg = f"Vibe update: {task_text[:40]}"
+        if file_sha:
+            gh.update_file("index.html", commit_msg, new_code, file_sha)
+        else:
+            gh.create_file("index.html", commit_msg, new_code)
+
+        await status_msg.edit_text(
+            f"✅ **Готово!**\n\n"
+            f"📝 **Задача:** {task_text}\n"
+            f"🚀 **Проверяй билд:** {VERCEL_URL}"
+        )
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Ошибка: {str(e)}")
+
+@dp.message(F.voice)
+async def handle_voice(message: types.Message):
+    wait_msg = await message.reply("🎙 Распознаю голос...")
+    file_id = message.voice.file_id
+    file = await bot.get_file(file_id)
+    file_bytes = await bot.download_file(file.file_path)
+    
+    transcription = groq_client.audio.transcriptions.create(
+        file=("audio.ogg", file_bytes.read()),
+        model="whisper-large-v3"
+    ).text
+    
+    await wait_msg.edit_text(f"🗣 **Услышал:** {transcription}")
+    await process_task(transcription, message)
+
+@dp.message(F.text)
+async def handle_text(message: types.Message):
+    await process_task(message.text, message)
+
+async def main():
+    print("Бот запущен...")
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
+  
