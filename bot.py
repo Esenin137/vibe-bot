@@ -42,9 +42,8 @@ async def process_task(task_text: str, message: types.Message):
     prompt = f"Текущий код проекта:\n{current_code}\n\nЗадача от пользователя:\n{task_text}\n\nНапиши обновленный файл index.html целиком."
 
     try:
-        # Здесь мы указали нужную модель, которую просит Google
         response = ai_client.models.generate_content(
-            model="gemini-3.8-flash",
+            model="gemini-1.5-flash",
             contents=prompt,
             config={"system_instruction": SYSTEM_PROMPT}
         )
