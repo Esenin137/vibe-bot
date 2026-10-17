@@ -21,53 +21,37 @@ ai_client = genai.Client(api_key=GEMINI_KEY) if GEMINI_KEY else None
 gh = Github(GITHUB_TOKEN).get_repo(GITHUB_REPO)
 
 SYSTEM_PROMPT = """
-Ты — элитный разработчик мобильных веб-приложений и HTML5 игр.
-Сгенерируй ПОЛНЫЙ, рабочий файл index.html (HTML + CSS + JS в одном файле).
+Ты — элитный разработчик мобильных веб-приложений и текстовых игр.
+Ты умеешь работать как с главным файлом index.html, так и со вспомогательными файлами (.js, .css, .json).
 ЖЁСТКИЕ ПРАВИЛА:
-1. Начни ответ строго с <!DOCTYPE html> и ОБЯЗАТЕЛЬНО закончи закрывающими тегами </script></body></html>. Никакого текста до или после кода!
-2. Пиши компактный, но красивый и функциональный код (до 250–300 строк), чтобы файл гарантированно поместился целиком и не оборвался на середине!
-3. НЕ используй новые CSS-свойства (ЗАПРЕЩЕНЫ: inset, dvh, clamp, min(), max(), aspect-ratio, place-items, gap во flex). Используй только классические top/left/right/bottom, 100vh, display: flex, margin/padding и стандартные размеры в px/% для 100% совместимости со всеми версиями мобильных браузеров и WebView.
-4. Все кнопки и клики должны надежно работать через стандартный addEventListener('click', ...) и 'touchstart'.
+1. Выдавай ТОЛЬКО чистый код запрашиваемого файла без пояснений до или после кода!
+2. Если пишем index.html — начни с <!DOCTYPE html> и закончи на </html>.
+3. Если пишем .js файл (например, chapter1.js с массивом сцен) — выдавай только чистый валидный JavaScript-код.
+4. Не используй проблемные новые CSS-свойства (inset, dvh, clamp, place-items).
 """
 
-def clean_html(raw_text: str) -> str:
-    # Убираем блок рассуждений <think>...</think>, если модель его добавила
-    raw_text = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL | re.IGNORECASE)
+def clean_code(raw_text: str, filename: str) -> str:
+    raw_text = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL | re.IGNORECASE).strip()
     
-    # Если внутри есть блок ```html ... ```, достаем только его содержимое
-    match = re.search(r"```(?:html)?\s*(<!DOCTYPE html>.*?</html>)\s*```", raw_text, re.DOTALL | re.IGNORECASE)
+    # Если внутри блока ```...```, достаем содержимое
+    match = re.search(r"```(?:html|javascript|js|css|json)?\s*(.*?)\s*```", raw_text, re.DOTALL | re.IGNORECASE)
     if match:
-        return match.group(1).strip()
-        
-    # Иначе просто вырезаем от <!DOCTYPE html> (или <html) до </html>
-    match2 = re.search(r"(<!DOCTYPE html>.*</html>|<html.*</html>)", raw_text, re.DOTALL | re.IGNORECASE)
-    if match2:
-        return match2.group(1).strip()
-        
-    # Если модель все равно не успела закрыть тег, аккуратно закрываем сами
-    cleaned = raw_text.strip()
-    if cleaned.startswith("```"):
-        cleaned = "\n".join(cleaned.split("\n")[1:])
-    if cleaned.endswith("```"):
-        cleaned = "\n".join(cleaned.split("\n")[:-1])
-    cleaned = cleaned.strip()
-    
-    if "<!doctype html>" in cleaned.lower():
-        idx = cleaned.lower().find("<!doctype html>")
-        cleaned = cleaned[idx:]
-        
-    return cleaned
+        raw_text = match.group(1).strip()
+
+    if filename.endswith(".html"):
+        match_html = re.search(r"(<!DOCTYPE html>.*</html>|<html.*</html>)", raw_text, re.DOTALL | re.IGNORECASE)
+        if match_html:
+            return match_html.group(1).strip()
+    return raw_text.strip()
 
 def generate_code_with_ai(prompt: str) -> str:
     errors = []
-
     if groq_client:
         try:
             avail_models = [
                 m.id for m in groq_client.models.list().data
                 if not any(bad in m.id.lower() for bad in ["whisper", "guard", "tts", "vision"])
             ]
-            # Приоритет отдаем проверенным моделям Llama и Qwen без лишних "рассуждений"
             preferred = [m for m in avail_models if any(k in m.lower() for k in ["llama-3.3", "llama-3.1", "qwen", "llama"])]
             models_to_try = preferred + [m for m in avail_models if m not in preferred]
 
@@ -103,34 +87,62 @@ def generate_code_with_ai(prompt: str) -> str:
     raise Exception("Детали ошибок API:\n" + "\n".join(errors[:4]))
 
 async def process_task(task_text: str, message: types.Message):
-    status_msg = await message.reply("⚙️ Архитектор думает и пишет код...")
-    
+    # Определяем, какой файл просит создать/изменить пользователь (по умолчанию index.html)
+    file_match = re.search(r"([a-zA-Z0-9_-]+\.(?:html|js|css|json))", task_text)
+    target_file = file_match.group(1) if file_match else "index.html"
+
+    status_msg = await message.reply(f"⚙️ Работаю над файлом `{target_file}`...")
+
     try:
-        current_file = gh.get_contents("index.html")
+        repo_files = [f.path for f in gh.get_contents("")]
+    except Exception:
+        repo_files = []
+
+    try:
+        current_file = gh.get_contents(target_file)
         current_code = current_file.decoded_content.decode("utf-8")
         file_sha = current_file.sha
     except Exception:
         current_code = ""
         file_sha = None
 
-    # Если просят написать "с нуля" или старый файл слишком огромный/битый, начинаем с чистого листа
-    if "с нуля" in task_text.lower() or len(current_code) > 25000 or "</html>" not in current_code.lower():
-        prompt = f"Задача от пользователя:\n{task_text}\n\nНапиши полный рабочий файл index.html с нуля (компактно, до 250 строк, обязательно закрой </html>)."
+    # Подгружаем контекст index.html, если создаем вспомогательный файл, чтобы ИИ знал имена переменных
+    main_context = ""
+    if target_file != "index.html" and "index.html" in repo_files:
+        try:
+            main_context = gh.get_contents("index.html").decoded_content.decode("utf-8")[:6000]
+        except Exception:
+            pass
+
+    if "с нуля" in task_text.lower() or not current_code:
+        prompt = (
+            f"Файлы в проекте: {', '.join(repo_files)}\n"
+            f"{f'Код главного файла index.html для контекста:{chr(10)}{main_context}{chr(10)}' if main_context else ''}"
+            f"Задача от пользователя:\n{task_text}\n\n"
+            f"Напиши полный рабочий код для файла {target_file} с нуля."
+        )
     else:
-        prompt = f"Текущий код проекта:\n{current_code}\n\nЗадача от пользователя:\n{task_text}\n\nНапиши обновленный файл index.html целиком (компактно, обязательно закрой </html>)."
+        prompt = (
+            f"Файлы в проекте: {', '.join(repo_files)}\n"
+            f"Текущий код файла {target_file}:\n{current_code}\n\n"
+            f"Задача от пользователя:\n{task_text}\n\n"
+            f"Напиши обновленный файл {target_file} целиком."
+        )
 
     try:
         raw_output = generate_code_with_ai(prompt)
-        new_code = clean_html(raw_output)
-
-        commit_msg = f"Vibe update: {task_text[:40]}"
+        new_code = clean_code(raw_output, target_file)
+        commit_msg = f"Vibe update {target_file}: {task_text[:30]}"
+        
         if file_sha:
-            gh.update_file("index.html", commit_msg, new_code, file_sha)
+            gh.update_file(target_file, commit_msg, new_code, file_sha)
         else:
-            gh.create_file("index.html", commit_msg, new_code)
+            gh.create_file(target_file, commit_msg, new_code)
 
         await status_msg.edit_text(
-            f"✅ **Готово!**\n\n📝 **Задача:** {task_text}\n🚀 **Проверяй билд:** {VERCEL_URL}"
+            f"✅ **Готово!** Обновлен файл: `{target_file}`\n\n"
+            f"📂 **Файлы проекта:** `{', '.join(repo_files) if repo_files else target_file}`\n"
+            f"🚀 **Проверяй билд:** {VERCEL_URL}"
         )
     except Exception as e:
         await status_msg.edit_text(f"❌ Ошибка:\n{str(e)[:3500]}")
@@ -141,12 +153,10 @@ async def handle_voice(message: types.Message):
     file_id = message.voice.file_id
     file = await bot.get_file(file_id)
     file_bytes = await bot.download_file(file.file_path)
-    
     transcription = groq_client.audio.transcriptions.create(
         file=("audio.ogg", file_bytes.read()),
         model="whisper-large-v3"
     ).text
-    
     await wait_msg.edit_text(f"🗣 **Услышал:** {transcription}")
     await process_task(transcription, message)
 
@@ -173,4 +183,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-                    
+        
