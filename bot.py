@@ -17,167 +17,149 @@ VERCEL_URL = (os.getenv("VERCEL_URL") or "").strip()
 
 bot = Bot(token=TG_TOKEN)
 dp = Dispatcher()
-groq_client = Groq(api_key=GROQ_KEY)
+groq_client = Groq(api_key=GROQ_KEY) if GROQ_KEY else None
 ai_client = genai.Client(api_key=GEMINI_KEY) if GEMINI_KEY else None
 gh = Github(GITHUB_TOKEN).get_repo(GITHUB_REPO)
 
 # ==================== БАЗА ЗНАНИЙ D&D: ЗАТЕРЯННЫЙ ХРАМ АНАКСА АПОГЕЙОНА ====================
 DND_SCENARIO_PROMPT = """
 Ты — атмосферный Мастер Подземелий (Dungeon Master) в D&D 5e. Ты ведешь приключение «Затерянный храм Анакса Апогейона» для героя 3-го уровня.
-Пиши художественно, мрачно (лавкрафтианское темное фэнтези), но по делу (1-3 абзаца за ход). Обращайся к игроку на «ты».
+Пиши художественно, мрачно (лавкрафтианское темное фэнтези), но по делу (1-2 абзаца за ход). Обращайся к игроку на «ты».
 
 ЛОР И ПРЕДЫСТОРИЯ:
 - 300 лет назад культ Великого Древнего Анакса Апогейона замуровал себя в храме в горах Западных пустошей со свитком призыва и умер от голода.
-- Недавно маг Натрин Йеллс (из магократии Аллен) украл мясного голема, повалил гигантского идола у входа и вошел в храм, но погиб внутри.
-- Демонический культ хаоса «Стадо Чёрной Козы» узнал об открытии храма и послал экспедицию за свитком.
-- Игрок нанят агентом магократии Финнием Каларексом, чтобы узнать судьбу мага Натрина Йеллса и забрать древний свиток.
+- Недавно маг Натрин Йеллс украл мясного голема, повалил гигантского идола у входа и вошел в храм, но погиб внутри.
+- Демонический культ хаоса «Стадо Чёрной Козы» послал экспедицию за свитком.
+- Игрок нанят агентом магократии Финнием Каларексом, чтобы узнать судьбу мага и забрать древний свиток.
 
 КАРТА И КОМНАТЫ ХРАМА (СТРОГО СЛЕДУЙ ЭТИМ ПРАВИЛАМ):
 [Комната 1: Вход]
-- Опрокинутый гигантский идол со щупальцами и одним глазом открывает туннель. Рядом стоит громадный Мясной голем (сшитый из кусков кожи).
-- Вход охраняют 2 культиста Чёрной Козы (КД 12, Хиты 9, кривая сабля +3, урон 1к6+1). На шеях серебряные ошейники с пентаграммой из колосьев пшеницы (Проверка Интеллекта/Истории СЛ 14 — символ Стада Чёрной Козы, цена 10 зм).
-- Культисты кричат уходить, угрожая натравить голема. ЭТО УЛОВКА И БЛЕФ: голем подчинялся только мертвому Натрину Йеллсу и просто стоит, пока его не атакуют.
-- Осмотр статуи Анакса Апогейона: требуется Спасбросок Харизмы СЛ 14, при провале 7 (2к6) психического урона.
-- Физическое повреждение статуи выпускает Рой бабочек смерти (КД 13, Хиты 22). Внутри идола спрятан Чёрный бриллиант (500 зм, Магия СЛ 16 — камень из иного мира).
+- Опрокинутый гигантский идол со щупальцами и одним глазом открывает туннель. Рядом стоит громадный Мясной голем.
+- Вход охраняют 2 культиста Чёрной Козы (КД 12, Хиты 9, сабля +3, урон 1к6+1). На шеях серебряные ошейники с пентаграммой из колосьев пшеницы (История СЛ 14 — символ Стада Чёрной Козы, 10 зм).
+- Культисты кричат уходить, угрожая натравить голема. ЭТО БЛЕФ: голем подчинялся только мертвому Натрину Йеллсу и не двигается, пока его не бьют.
+- Осмотр статуи: Спасбросок Харизмы СЛ 14 или 7 психического урона. Повреждение статуи выпускает Рой бабочек смерти (КД 13, Хиты 22). Внутри идола Чёрный бриллиант (500 зм).
 
 [Комната 2: Лестница]
-- Крутая лестница вниз, десятки скелетов 300-летней давности в серых лохмотьях и 2 свежих трупа культистов Чёрной Козы (Расследование СЛ 12).
-- Стены покрыты резьбой: сотни глаз и тысячи щупалец.
-- ЛОВУШКА: Расследование СЛ 14 покажет, что глаза пульсируют энергией (Магия СЛ 14 — некротическая). Разрушить энергию можно проверкой Интеллекта (Магия или Религия) СЛ 14.
-- Если спускаться без обезвреживания: на середине пути глаза вспыхивают фиолетовым! Нужен Спасбросок Телосложения СЛ 12. При провале — обморок и черные эфирные щупальца из стен высасывают жизнь: 7 (2к6) некротического урона.
+- Лестница вниз, скелеты 300-летней давности и 2 свежих трупа культистов (Расследование СЛ 12). Стены покрыты резьбой сотен глаз и щупалец.
+- ЛОВУШКА: Расследование/Магия СЛ 14 покажет некротическую энергию глаз. Разрушить можно Магией или Религией СЛ 14.
+- Иначе на середине пути глаза вспыхивают фиолетовым: Спасбросок Телосложения СЛ 12 или обморок и 7 некротического урона от эфирных щупалец из стен.
 
 [Комната 3: Реликварий]
-- Длинный холл с нишами, где стоят изуродованные останки. В передней части — яма с шипами глубиной 20 футов, на дне 2 пронзенных трупа культистов.
-- Восприятие СЛ 13: тела в нишах шевелятся. При входе в зал 4 тела издают жуткий визг! Нужен Спасбросок Мудрости СЛ 10 или эффект Ужаса (бегство, при 1-2 на к6 падение в яму с шипами: 7 колющего + 3 урона ядом).
-- С останков срываются 4 Кожные летучие мыши (КД 12, Хиты 10, укус +4, урон 1к4+2) и атакуют.
-- СЕКРЕТ: Расследование СЛ 13 у правой стены за трупом культиста обнаружит сквозняк из тонкой каменной кладки. Пробив стену, герой попадает в Комнату 4.
+- Длинный холл с нишами и изуродованными телами. Спереди яма с шипами (20 футов, на дне 2 трупа культистов).
+- При входе 4 тела издают визг: Спасбросок Мудрости СЛ 10 или Ужас (бегство, шанс упасть в яму на 10 урона). Атакуют 4 Кожные летучие мыши (КД 12, Хиты 10).
+- СЕКРЕТ: Расследование СЛ 13 у правой стены обнаружит сквозняк и проход в Комнату 4.
 
 [Комната 4: Тайное хранилище]
-- Нетронутый зал, каменная плита со скелетом (300 лет, ловушек нет), по углам 4 одноглазые статуи со щупальцами.
-- СОКРОВИЩЕ: на скелете блестящие «Наручи защиты (+2 к КД)».
+- Каменная плита со скелетом (ловушек нет). СОКРОВИЩЕ: блестящие «Наручи защиты (+2 к КД)».
 
 [Комната 5: Зал Второго]
-- Фиолетовые факелы на стенах, труп культиста с искаженным агонией лицом. На каменной платформе поднимается древняя Мумия (КД 11, Хиты 38, кулак +5, урон 2к6+3) и атакует!
+- Фиолетовые факелы, труп культиста. С платформы встает Мумия (КД 11, Хиты 38, удар +5, урон 10) и атакует!
 - СОКРОВИЩЕ на полу: магический Скимитар +1 «Пыль» (раз в сутки создает Туманное облако).
 
 [Комната 6: Зал Криков]
-- Два обёрнутых тканью тела в нишах, лужа крови. Изо рта левого трупа выползает неземная чёрная оса (Магия/Природа СЛ 12).
-- При проходе вылетают 2 Роя чёрных ос (КД 12, Хиты 22 каждый, укусы +3, урон 2к4) и атакуют.
+- Два трупа в нишах, изо рта выползает неземная чёрная оса (Магия/Природа СЛ 12). При проходе атакуют 2 Роя чёрных ос (КД 12, Хиты 22).
 
 [Комната 7: Алтарь В'атлуса (ФИНАЛ)]
-- Восьмиугольный каменный зиккурат, под потолком вращается фиолетовый портал. На полу безголовый труп мага Натрина Йеллса (у него предмет «Волшебная палочка секретов»).
-- На ступенях зиккурата фанатик Корреш Шепчущий дочитывает свиток: «Дело сделано, Анакс Апогейон слышит меня!»
-- В этот миг из портала падает чудовище ДОРРЕК (аберрация со щупальцами и кальмарьим клювом, КД 15, Хиты 93, укус +6 на 4к8+4, два щупальца +6 на 1к8+4, захват СЛ 14).
-- Доррек мгновенно отрывает голову Коррешу, свиток падает на песок. Первые 2 раунда Доррек жует тело Корреша и бьет героя только щупальцами!
-- После победы над Дорреком портал схлопывается. Герой решает судьбу «Свитка Анакса Апогейона» (отдать магократии Аллен, отдать культу Чёрной Козы или уничтожить).
+- Восьмиугольный зиккурат, фиолетовый портал под потолком. На полу безголовый труп мага Натрина Йеллса (предмет «Волшебная палочка секретов»).
+- Фанатик Корреш Шепчущий читает свиток: «Дело сделано, Анакс Апогейон слышит меня!»
+- Из портала падает босс ДОРРЕК (КД 15, Хиты 93, укус +6 на 22 урона, два щупальца +6 на 8 урона, захват СЛ 14). Он отрывает голову Коррешу, свиток падает на пол. Первые 2 раунда Доррек жует Корреша и бьет героя только щупальцами!
+- После победы над Дорреком портал схлопывается, герой решает судьбу «Свитка Анакса Апогейона».
 
-ПРАВИЛА ОТВЕТА (СТРОГО ВЕРНИ JSON):
-Ты ОБЯЗАН вернуть ответ СТРОГО в формате валидного JSON-объекта со следующими полями:
+ФОРМАТ ОТВЕТА — СТРОГО JSON:
 {
-  "reply": "Твой художественный ответ Мастера. Если нужна проверка навыка, спасбросок или бросок атаки — четко напиши в конце ответа, какой бросок d20 и с какой Сложностью (СЛ) должен сделать игрок!",
-  "room": номер_текущей_комнаты_от_1_до_7,
-  "hp_change": число_изменения_здоровья_игрока (например -7 при уроне, +10 при лечении или 0),
-  "add_item": "Название найденного предмета" или null,
-  "roll_needed": { "label": "Название проверки (например: Спасбросок Харизмы СЛ 14)", "bonus": бонус_числом_например_2, "dc": сложность_числом_например_14 } или null
+  "reply": "Твой ответ Мастера (если нужен бросок кубика — напиши в конце, какой именно и с какой СЛ)",
+  "room": номер_комнаты_от_1_до_7,
+  "hp_change": число_изменения_HP_например_0_или_-7,
+  "add_item": "Название предмета" или null,
+  "roll_needed": { "label": "Название проверки (например: Спасбросок Харизмы СЛ 14)", "bonus": 2, "dc": 14 } или null
 }
-Никакого текста до или после JSON!
 """
 
-# ==================== ЛОГИКА TELEGRAM-БОТА ДЛЯ ВАЙБКОДИНГА ====================
 SYSTEM_PROMPT = """
 Ты — элитный разработчик мобильных веб-приложений и HTML5 игр.
-Твоя задача — вернуть ПОЛНЫЙ рабочий код запрошенного файла.
-ЖЁСТКИЕ ПРАВИЛА:
-1. Если создаешь index.html — начни строго с <!DOCTYPE html> и закончи </html>.
-2. Если создаешь .js файл — пиши ТОЛЬКО чистый JavaScript код без тегов <script>.
-3. Не пиши никаких приветствий, пояснений и markdown-оболочек ```.
+Сгенерируй ПОЛНЫЙ, рабочий файл index.html (HTML + CSS + JS в одном файле).
+Начни ответ строго с <!DOCTYPE html> и закончи на </html>. Никакого текста до или после кода!
 """
 
-def clean_code(raw_text: str, filename: str) -> str:
-    text = raw_text.strip()
-    text = re.sub(r"^```[a-zA-Z]*\n", "", text)
-    text = re.sub(r"\n```$", "", text)
-    text = text.strip()
-    if filename.endswith(".html"):
-        start = text.find("<!DOCTYPE")
-        if start == -1:
-            start = text.find("<html")
-        end = text.rfind("</html>")
-        if start != -1 and end != -1:
-            text = text[start:end + 7]
-    return text
+def get_working_groq_models():
+    if not groq_client:
+        return []
+    try:
+        avail = [
+            m.id for m in groq_client.models.list().data
+            if not any(bad in m.id.lower() for bad in ["whisper", "guard", "tts", "vision", "audio"])
+        ]
+        pref = [m for m in avail if any(k in m.lower() for k in ["llama-3.3", "llama-3.1", "qwen", "llama"])]
+        return pref + [m for m in avail if m not in pref]
+    except Exception:
+        return ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
 
-async def generate_with_ai(prompt: str, sys_prompt: str) -> str:
-    # 1. Пробуем через быстрый Groq Llama 3.3
-    models_to_try = ["llama-3.3-70b-versatile", "llama3-70b-8192"]
-    for m in models_to_try:
-        try:
-            chat_completion = groq_client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": sys_prompt},
-                    {"role": "user", "content": prompt}
-                ],
-                model=m,
-                temperature=0.5,
-                max_tokens=7500
-            )
-            return chat_completion.choices[0].message.content
-        except Exception as e:
-            print(f"Groq {m} error: {e}")
-
-    # 2. Резерв через Gemini
-    if ai_client:
-        for gm in ["gemini-2.0-flash", "gemini-1.5-flash"]:
+def call_ai_sync(messages, max_tokens=4000, json_mode=False):
+    errors = []
+    if groq_client:
+        for m in get_working_groq_models()[:5]:
             try:
-                resp = ai_client.models.generate_content(
-                    model=gm,
-                    contents=prompt,
-                    config={"system_instruction": sys_prompt}
-                )
+                kwargs = {
+                    "model": m,
+                    "messages": messages,
+                    "temperature": 0.5,
+                    "max_tokens": max_tokens,
+                }
+                if json_mode:
+                    kwargs["response_format"] = {"type": "json_object"}
+                resp = groq_client.chat.completions.create(**kwargs)
+                return resp.choices[0].message.content
+            except Exception as e:
+                errors.append(f"Groq({m}): {str(e)[:100]}")
+
+    if ai_client:
+        full_text = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+        for gm in ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-3.8-flash"]:
+            try:
+                resp = ai_client.models.generate_content(model=gm, contents=full_text)
                 return resp.text
             except Exception as e:
-                print(f"Gemini {gm} error: {e}")
+                errors.append(f"Gemini({gm}): {str(e)[:100]}")
 
-    raise RuntimeError("Все модели временно недоступны.")
+    raise RuntimeError("Детали ошибок API:\n" + "\n".join(errors[:4]))
+
+def clean_html(raw_text: str) -> str:
+    raw_text = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL | re.IGNORECASE)
+    match = re.search(r"(<!DOCTYPE html>.*</html>|<html.*</html>)", raw_text, re.DOTALL | re.IGNORECASE)
+    if match:
+        return match.group(1).strip()
+    return raw_text.strip()
 
 async def process_task(task_text: str, message: types.Message):
-    file_match = re.search(r"([a-zA-Z0-9_-]+\.(?:html|js|css|json))", task_text)
-    target_file = file_match.group(1) if file_match else "index.html"
-    status_msg = await message.reply(f"⚙️ Работаю над файлом `{target_file}`...")
-
-    reset_words = ["с нуля", "заново", "перепиши полностью"]
-    is_reset = any(w in task_text.lower() for w in reset_words)
-
-    current_code = ""
-    file_sha = None
+    status_msg = await message.reply("⚙️ Архитектор думает и пишет код...")
     try:
-        f_obj = gh.get_contents(target_file)
-        file_sha = f_obj.sha
-        if not is_reset:
-            current_code = f_obj.decoded_content.decode("utf-8")
+        current_file = gh.get_contents("index.html")
+        current_code = current_file.decoded_content.decode("utf-8")
+        file_sha = current_file.sha
     except Exception:
-        pass
+        current_code = ""
+        file_sha = None
 
-    prompt = f"Целевой файл: {target_file}\n"
-    if current_code:
-        prompt += f"Текущий код файла:\n{current_code}\n\n"
-    prompt += f"Задача от пользователя:\n{task_text}\n\nВерни полный код файла {target_file}."
+    if "с нуля" in task_text.lower() or len(current_code) > 25000:
+        prompt = f"Задача:\n{task_text}\n\nНапиши полный рабочий index.html с нуля."
+    else:
+        prompt = f"Текущий код:\n{current_code}\n\nЗадача:\n{task_text}\n\nВерни обновленный index.html целиком."
 
     try:
-        raw_result = await generate_with_ai(prompt, SYSTEM_PROMPT)
-        new_code = clean_code(raw_result, target_file)
-        commit_msg = f"Update {target_file}: {task_text[:35]}"
+        raw_output = call_ai_sync([
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt}
+        ], max_tokens=6000, json_mode=False)
+        new_code = clean_html(raw_output)
+        commit_msg = f"Vibe update: {task_text[:40]}"
         if file_sha:
-            gh.update_file(target_file, commit_msg, new_code, file_sha)
+            gh.update_file("index.html", commit_msg, new_code, file_sha)
         else:
-            gh.create_file(target_file, commit_msg, new_code)
+            gh.create_file("index.html", commit_msg, new_code)
 
-        await status_msg.edit_text(
-            f"✅ **Готово! Обновлен файл:** `{target_file}`\n"
-            f"🚀 **Открыть игру:** {VERCEL_URL}"
-        )
+        await status_msg.edit_text(f"✅ **Готово!**\n🚀 **Открыть:** {VERCEL_URL}")
     except Exception as e:
-        await status_msg.edit_text(f"❌ Ошибка: {str(e)}")
+        await status_msg.edit_text(f"❌ Ошибка:\n{str(e)[:3500]}")
 
 @dp.message(F.voice)
 async def handle_voice(message: types.Message):
@@ -215,28 +197,26 @@ async def handle_dm_chat(request):
         history = data.get("history", [])
         state = data.get("state", {})
 
-        messages = [{"role": "system", "content": DND_SCENARIO_PROMPT}]
-        messages.append({
-            "role": "system",
-            "content": f"ТЕКУЩЕЕ СОСТОЯНИЕ ИГРОКА: Комната №{state.get('room', 1)}, Здоровье: {state.get('hp', 28)}/{state.get('maxHp', 28)}, КД: {state.get('ac', 16)}, Инвентарь: {', '.join(state.get('inventory', []))}."
-        })
+        messages = [
+            {"role": "system", "content": DND_SCENARIO_PROMPT},
+            {"role": "system", "content": f"СОСТОЯНИЕ ГЕРОЯ: Комната №{state.get('room', 1)}, HP: {state.get('hp', 28)}/{state.get('maxHp', 28)}, КД: {state.get('ac', 16)}, Инвентарь: {', '.join(state.get('inventory', []))}."}
+        ]
         for h in history[-8:]:
             messages.append({"role": h.get("role", "user"), "content": h.get("content", "")})
         messages.append({"role": "user", "content": user_action})
 
-        completion = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=messages,
-            temperature=0.65,
-            max_tokens=1200,
-            response_format={"type": "json_object"}
-        )
-        raw_json = completion.choices[0].message.content
-        parsed = json.loads(raw_json)
+        try:
+            raw_json = call_ai_sync(messages, max_tokens=1200, json_mode=True)
+            parsed = json.loads(raw_json)
+        except Exception:
+            raw_text = call_ai_sync(messages, max_tokens=1200, json_mode=False)
+            m = re.search(r"\{.*\}", raw_text, re.DOTALL)
+            parsed = json.loads(m.group(0)) if m else {"reply": raw_text, "room": state.get("room", 1), "hp_change": 0, "add_item": None, "roll_needed": None}
+
         return web.json_response(parsed, headers=CORS_HEADERS)
     except Exception as e:
         return web.json_response({
-            "reply": f"Магический туман помешал связи с Древним ({str(e)}). Попробуй повторить действие!",
+            "reply": f"⚠️ Техническая заминка Мастера: {str(e)}",
             "room": 1,
             "hp_change": 0,
             "add_item": None,
@@ -277,3 +257,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+          
